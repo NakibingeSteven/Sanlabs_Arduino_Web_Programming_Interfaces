@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web BLE Test - Aquos Sense 5G</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        
+        .card {
+            background: #16213e;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 15px 0;
+            border: 1px solid #0f3460;
+        }
+        
+        button {
+            background: linear-gradient(45deg, #e94560, #f39c12);
+            border: none;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 8px;
+            transition: transform 0.2s;
+        }
+        
+        button:hover {
+            transform: scale(1.05);
+        }
+        
+        button:disabled {
+            background: #555;
+            cursor: not-allowed;
+            transform: none;
+        }
+        
+        .status {
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        
+        .success { background: #27ae60; }
+        .error { background: #e74c3c; }
+        .warning { background: #f39c12; }
+        .info { background: #3498db; }
+        
+        #log {
+            background: #000;
+            color: #0f0;
+            padding: 15px;
+            border-radius: 6px;
+            font-family: monospace;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            margin-top: 15px;
+        }
+        
+        .device-info {
+            background: #2c3e50;
+            padding: 10px;
+            border-radius: 6px;
+            margin: 10px 0;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔵 Web BLE Test for Aquos Sense 5G</h1>
+    
+    <div class="card">
+        <h2>Device Detection</h2>
+        <div id="deviceInfo"></div>
+        <button onclick="checkSupport()">Check BLE Support</button>
+    </div>
+
+    <div class="card">
+        <h2>Arduino HC-06 Connection Test</h2>
+        <p>This will test connection to HC-06 Bluetooth module</p>
+        <button onclick="connectHC06()" id="connectBtn">Connect to HC-06</button>
+        <button onclick="disconnect()" id="disconnectBtn" disabled>Disconnect</button>
+        <div id="connectionStatus"></div>
+    </div>
+
+    <div class="card">
+        <h2>Data Communication</h2>
+        <button onclick="sendCommand('LED_ON')" id="ledOnBtn" disabled>LED ON</button>
+        <button onclick="sendCommand('LED_OFF')" id="ledOffBtn" disabled>LED OFF</button>
+        <button onclick="sendCommand('READ_SENSOR')" id="sensorBtn" disabled>Read Sensor</button>
+        <div id="dataDisplay"></div>
+    </div>
+
+    <div class="card">
+        <h2>Debug Log</h2>
+        <button onclick="clearLog()">Clear Log</button>
+        <div id="log"></div>
+    </div>
+
+    <script>
+        let device = null;
+        let characteristic = null;
+        let connected = false;
+
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const logElement = document.getElementById('log');
+            logElement.textContent += `[${timestamp}] ${message}\n`;
+            logElement.scrollTop = logElement.scrollHeight;
+            
+            console.log(message);
+        }
+
+        function updateStatus(message, type = 'info') {
+            const statusDiv = document.getElementById('connectionStatus');
+            statusDiv.innerHTML = `<div class="status ${type}">${message}</div>`;
+        }
+
+        function clearLog() {
+            document.getElementById('log').textContent = '';
+        }
+
+        async function checkSupport() {
+            const deviceInfoDiv = document.getElementById('deviceInfo');
+            
+            // Check basic support
+            if (!navigator.bluetooth) {
+                deviceInfoDiv.innerHTML = '<div class="status error">❌ Web Bluetooth NOT supported</div>';
+                log('Web Bluetooth not supported', 'error');
+                return;
+            }
+
+            // Get device info
+            const userAgent = navigator.userAgent;
+            const isChrome = /Chrome/.test(userAgent);
+            const isAndroid = /Android/.test(userAgent);
+            
+            let deviceInfo = `
+                <div class="device-info">
+                    <strong>Browser:</strong> ${isChrome ? 'Chrome ✅' : 'Other ⚠️'}<br>
+                    <strong>Platform:</strong> ${isAndroid ? 'Android ✅' : 'Other ⚠️'}<br>
+                    <strong>User Agent:</strong> ${userAgent.substring(0, 80)}...<br>
+                    <strong>HTTPS:</strong> ${location.protocol === 'https:' ? 'Yes ✅' : 'No ❌'}<br>
+                    <strong>Web BLE:</strong> Available ✅<br>
+                    <strong>URL:</strong> ${location.href}<br>
+                    <strong>Chrome Version:</strong> ${navigator.userAgent.match(/Chrome\/(\d+)/)?.[1] || 'Unknown'}
+                </div>
+            `;
+
+            deviceInfoDiv.innerHTML = deviceInfo;
+            log('Web BLE is supported on this device', 'success');
+
+            // Test availability with detailed error handling
+            try {
+                const available = await navigator.bluetooth.getAvailability();
+                log(`Bluetooth available: ${available}`, available ? 'success' : 'warning');
+                
+                if (!available) {
+                    log('TROUBLESHOOTING STEPS:', 'warning');
+                    log('1. Enable Bluetooth in phone settings', 'info');
+                    log('2. Chrome → Settings → Site Settings → Bluetooth → Allow', 'info');
+                    log('3. Try chrome://flags/#enable-web-bluetooth-new-permissions-backend', 'info');
+                }
+            } catch (error) {
+                log(`Error checking availability: ${error.message}`, 'error');
+                log('This might be a permissions issue', 'warning');
+            }
+
+            // Test permissions policy
+            try {
+                // This will tell us if permissions policy is blocking
+                const permissionStatus = await navigator.permissions.query({name: 'bluetooth'});
+                log(`Permission status: ${permissionStatus.state}`, 'info');
+            } catch (error) {
+                log(`Permission query failed: ${error.message}`, 'warning');
+            }
+        }
+
+        async function connectHC06() {
+            try {
+                updateStatus('Scanning for HC-06...', 'info');
+                log('Starting connection to HC-06');
+
+                // Request device - HC-06 typically uses these service UUIDs
+                device = await navigator.bluetooth.requestDevice({
+                    filters: [
+                        { name: 'HC-06' },
+                        { namePrefix: 'HC-' },
+                        { services: ['0000ffe0-0000-1000-8000-00805f9b34fb'] }
+                    ],
+                    optionalServices: [
+                        '0000ffe0-0000-1000-8000-00805f9b34fb',
+                        '0000ffe1-0000-1000-8000-00805f9b34fb'
+                    ]
+                });
+
+                log(`Found device: ${device.name || 'Unknown'}`);
+                updateStatus('Connecting to GATT server...', 'info');
+
+                // Connect to GATT server
+                const server = await device.gatt.connect();
+                log('Connected to GATT server');
+
+                // Get service
+                const service = await server.getPrimaryService('0000ffe0-0000-1000-8000-00805f9b34fb');
+                log('Got primary service');
+
+                // Get characteristic
+                characteristic = await service.getCharacteristic('0000ffe1-0000-1000-8000-00805f9b34fb');
+                log('Got characteristic');
+
+                // Listen for notifications
+                characteristic.addEventListener('characteristicvaluechanged', handleNotification);
+                await characteristic.startNotifications();
+                log('Notifications started');
+
+                connected = true;
+                updateStatus('✅ Connected to HC-06 successfully!', 'success');
+                updateButtonStates();
+
+                // Connection lost handler
+                device.addEventListener('gattserverdisconnected', () => {
+                    log('Device disconnected', 'warning');
+                    connected = false;
+                    updateStatus('❌ Device disconnected', 'warning');
+                    updateButtonStates();
+                });
+
+            } catch (error) {
+                log(`Connection failed: ${error.message}`, 'error');
+                updateStatus(`❌ Connection failed: ${error.message}`, 'error');
+                connected = false;
+                updateButtonStates();
+            }
+        }
+
+        function handleNotification(event) {
+            const value = new TextDecoder().decode(event.target.value);
+            log(`Received from Arduino: ${value}`, 'success');
+            
+            const dataDiv = document.getElementById('dataDisplay');
+            dataDiv.innerHTML = `<div class="status success">Arduino Data: ${value}</div>`;
+        }
+
+        async function sendCommand(command) {
+            if (!connected || !characteristic) {
+                log('Not connected to device', 'error');
+                return;
+            }
+
+            try {
+                const encoder = new TextEncoder();
+                await characteristic.writeValue(encoder.encode(command + '\n'));
+                log(`Sent command: ${command}`, 'success');
+                
+                const dataDiv = document.getElementById('dataDisplay');
+                dataDiv.innerHTML = `<div class="status info">Sent: ${command}</div>`;
+            } catch (error) {
+                log(`Failed to send command: ${error.message}`, 'error');
+                updateStatus(`❌ Send failed: ${error.message}`, 'error');
+            }
+        }
+
+        function disconnect() {
+            if (device && device.gatt.connected) {
+                device.gatt.disconnect();
+                log('Disconnected from device');
+            }
+            connected = false;
+            updateStatus('Disconnected', 'info');
+            updateButtonStates();
+        }
+
+        function updateButtonStates() {
+            document.getElementById('connectBtn').disabled = connected;
+            document.getElementById('disconnectBtn').disabled = !connected;
+            document.getElementById('ledOnBtn').disabled = !connected;
+            document.getElementById('ledOffBtn').disabled = !connected;
+            document.getElementById('sensorBtn').disabled = !connected;
+        }
+
+        // Initialize
+        checkSupport();
+        updateButtonStates();
+    </script>
+</body>
+</html>
